@@ -1,0 +1,336 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         String    @default("CUSTOMER") // "MERCHANT", "CUSTOMER", "ADMIN"
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  merchant     Merchant?
+  customer     Customer?
+}
+
+model Merchant {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeName   String
+  slug        String   @unique
+  category    String   @default("Electronics & Tech")
+  description String?
+  apiKey      String?
+  logoUrl     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products         Product[]
+  orders           Order[]
+  payments         Payment[]
+  settings         MerchantSettings?
+  policies         Policy[]
+  aiSessions       AiSession[]
+  auditLogs        AuditLog[]
+  revenueMetrics   RevenueMetric[]
+  aiActions        AiAction[]
+}
+
+model Customer {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  email     String
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  carts     Cart[]
+  orders    Order[]
+  sessions  AiSession[]
+}
+
+model Product {
+  id               String   @id @default(uuid())
+  merchantId       String
+  merchant         Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name             String
+  slug             String
+  description      String
+  category         String   // "laptops", "monitors", "smartphones", "headphones", "keyboards", "mice", "accessories", "warranty"
+  price            Float
+  originalPrice    Float?
+  stock            Int      @default(10)
+  rating           Float    @default(4.5)
+  reviewsCount     Int      @default(0)
+  features         String   // JSON string array of key features
+  specifications   String   // JSON string of specs e.g. {"ram": "16GB", "gpu": "RTX 4060", ...}
+  tags             String   // Comma separated tags e.g. "ai-ready,developer,gaming"
+  active           Boolean  @default(true)
+  priorityScore    Float    @default(1.0)
+  imageUrl         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  relationshipsFrom ProductRelationship[] @relation("SourceProduct")
+  relationshipsTo   ProductRelationship[] @relation("TargetProduct")
+  cartItems         CartItem[]
+  orderItems        OrderItem[]
+}
+
+model ProductRelationship {
+  id               String   @id @default(uuid())
+  sourceProductId  String
+  sourceProduct    Product  @relation("SourceProduct", fields: [sourceProductId], references: [id], onDelete: Cascade)
+  targetProductId  String
+  targetProduct    Product  @relation("TargetProduct", fields: [targetProductId], references: [id], onDelete: Cascade)
+  type             String   // "UPSELL", "CROSS_SELL", "ACCESSORY", "WARRANTY"
+  discountPercent  Float    @default(0.0)
+  reason           String?
+  active           Boolean  @default(true)
+  priority         Int      @default(1)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Cart {
+  id          String     @id @default(uuid())
+  customerId  String?
+  customer    Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  merchantId  String
+  sessionId   String     @unique
+  status      String     @default("ACTIVE") // "ACTIVE", "ABANDONED", "CONVERTED"
+  subtotal    Float      @default(0.0)
+  discount    Float      @default(0.0)
+  total       Float      @default(0.0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  items       CartItem[]
+  orders      Order[]
+}
+
+model CartItem {
+  id             String   @id @default(uuid())
+  cartId         String
+  cart           Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity       Int      @default(1)
+  unitPrice      Float
+  isUpsell       Boolean  @default(false)
+  approvedByUser Boolean  @default(true)
+  upsellReason   String?
+  createdAt      DateTime @default(now())
+}
+
+model Order {
+  id                     String      @id @default(uuid())
+  orderNumber            String      @unique
+  merchantId             String
+  merchant               Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customerId             String?
+  customer               Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cartId                 String?
+  cart                   Cart?       @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  status                 String      @default("PENDING") // "PENDING", "PROCESSING", "PAID", "FAILED", "REFUNDED", "CANCELLED"
+  subtotal               Float
+  discountAmount         Float       @default(0.0)
+  totalAmount            Float
+  currency               String      @default("INR")
+  razorpayOrderId        String?     @unique
+  razorpayPaymentId      String?
+  razorpaySignature      String?
+  policyValidationStatus String      @default("PENDING") // "PASSED", "FAILED", "BYPASS"
+  failureReason          String?
+  isAiAssisted           Boolean     @default(true)
+  hasUpsell              Boolean     @default(false)
+  upsellRevenue          Float       @default(0.0)
+  customerName           String?
+  customerEmail          String?
+  customerPhone          String?
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+
+  items                  OrderItem[]
+  payments               Payment[]
+  auditLogs              AuditLog[]
+}
+
+model OrderItem {
+  id           String   @id @default(uuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productName  String
+  quantity     Int      @default(1)
+  unitPrice    Float
+  totalPrice   Float
+  isUpsell     Boolean  @default(false)
+  upsellReason String?
+  createdAt    DateTime @default(now())
+}
+
+model Payment {
+  id                String   @id @default(uuid())
+  orderId           String
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  merchantId        String
+  merchant          Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  amount            Float
+  currency          String   @default("INR")
+  status            String   @default("INITIATED") // "INITIATED", "SUCCESS", "FAILED", "REFUNDED"
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+  paymentMethod     String?  // "card", "upi", "netbanking", "wallet"
+  errorMessage      String?
+  metadata          String?  // JSON metadata string
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model AiSession {
+  id                     String      @id @default(uuid())
+  sessionId              String      @unique
+  merchantId             String
+  merchant               Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customerId             String?
+  customer               Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  status                 String      @default("ACTIVE") // "ACTIVE", "COMPLETED", "ABANDONED"
+  intentSummary          String?     // Extracted JSON string
+  productsViewedCount    Int         @default(0)
+  upsellOfferedCount     Int         @default(0)
+  upsellAcceptedCount    Int         @default(0)
+  totalGeneratedRevenue  Float       @default(0.0)
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+
+  messages               AiMessage[]
+  actions                AiAction[]
+  auditLogs              AuditLog[]
+}
+
+model AiMessage {
+  id          String    @id @default(uuid())
+  aiSessionId String
+  session     AiSession @relation(fields: [aiSessionId], references: [id], onDelete: Cascade)
+  role        String    // "user", "assistant", "system", "tool"
+  content     String
+  toolCalls   String?   // JSON representation of tool calls
+  toolCallId  String?
+  toolName    String?
+  metadata    String?   // JSON metadata (e.g. recommendation details, upsell cards)
+  createdAt   DateTime  @default(now())
+}
+
+model AiAction {
+  id                 String    @id @default(uuid())
+  aiSessionId        String
+  session            AiSession @relation(fields: [aiSessionId], references: [id], onDelete: Cascade)
+  merchantId         String
+  merchant           Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  toolName           String
+  inputPayload       String    // JSON string
+  outputPayload      String    // JSON string
+  policyCheckPassed  Boolean   @default(true)
+  executionStatus    String    @default("SUCCESS") // "SUCCESS", "FAILED", "BLOCKED"
+  latencyMs          Int       @default(0)
+  createdAt          DateTime  @default(now())
+}
+
+model AuditLog {
+  id              String     @id @default(uuid())
+  auditCode       String     @unique // e.g. "AC-10492"
+  sessionId       String?
+  aiSession       AiSession? @relation(fields: [sessionId], references: [sessionId], onDelete: SetNull)
+  userId          String?
+  merchantId      String
+  merchant        Merchant   @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  actionType      String     // "INTENT_EXTRACTION", "PRODUCT_RECOMMENDATION", "UPSELL_OFFERED", "UPSELL_ACCEPTED", "POLICY_EVALUATION", "ORDER_CREATED", "PAYMENT_VERIFIED", "PAYMENT_FAILED"
+  toolName        String?
+  inputSummary    String
+  decisionSummary String
+  reason          String?
+  policyResult    String     @default("PASSED") // "PASSED", "VIOLATION", "BYPASS"
+  executionResult String     @default("SUCCESS") // "SUCCESS", "FAILED", "BLOCKED"
+  relatedOrderId  String?
+  order           Order?     @relation(fields: [relatedOrderId], references: [id], onDelete: SetNull)
+  status          String     @default("COMMITTED")
+  timestamp       DateTime   @default(now())
+}
+
+model MerchantSettings {
+  id                         String   @id @default(uuid())
+  merchantId                 String   @unique
+  merchant                   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  maxTransactionAmount       Float    @default(100000.0) // ₹1,00,000 INR
+  maxDiscountPercent         Float    @default(15.0)     // 15%
+  upsellRequiresApproval     Boolean  @default(true)     // Hard policy
+  paymentRequiresConfirm     Boolean  @default(true)
+  refundRequiresMerchant     Boolean  @default(true)
+  autoAiDiscoveryEnabled     Boolean  @default(true)
+  rankingWeightMatch         Float    @default(0.35)
+  rankingWeightPrice         Float    @default(0.25)
+  rankingWeightRating        Float    @default(0.15)
+  rankingWeightStock         Float    @default(0.15)
+  rankingWeightPriority      Float    @default(0.10)
+  simulatePaymentFailure     Boolean  @default(false)
+  simulatePolicyViolation    Boolean  @default(false)
+  simulateAiDown             Boolean  @default(false)
+  razorpayKeyId              String?
+  razorpayKeySecret          String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model Policy {
+  id          String   @id @default(uuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  code        String   // "MAX_TRANSACTION_AMOUNT", "MAX_DISCOUNT_PERCENT", "UPSELL_REQUIRES_CUSTOMER_APPROVAL", "PAYMENT_REQUIRES_CUSTOMER_CONFIRMATION"
+  name        String
+  description String
+  ruleType    String   // "LIMIT", "BOOLEAN", "SANCTION"
+  value       String   // e.g. "100000", "15", "true"
+  isActive    Boolean  @default(true)
+  severity    String   @default("HIGH") // "CRITICAL", "HIGH", "MEDIUM"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model RevenueMetric {
+  id                      String   @id @default(uuid())
+  merchantId              String
+  merchant                Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  date                    String   // YYYY-MM-DD
+  totalSessions           Int      @default(0)
+  aiSessionsCount         Int      @default(0)
+  baselineSessionsCount   Int      @default(0)
+  totalOrders             Int      @default(0)
+  aiOrdersCount           Int      @default(0)
+  baselineOrdersCount     Int      @default(0)
+  totalRevenue            Float    @default(0.0)
+  aiAssistedRevenue       Float    @default(0.0)
+  upsellRevenue           Float    @default(0.0)
+  crossSellRevenue        Float    @default(0.0)
+  baselineRevenue         Float    @default(0.0)
+  aovBaseline             Float    @default(0.0)
+  aovAi                   Float    @default(0.0)
+  upsellImpressions       Int      @default(0)
+  upsellAcceptances       Int      @default(0)
+  conversionRateBaseline  Float    @default(0.0)
+  conversionRateAi        Float    @default(0.0)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
