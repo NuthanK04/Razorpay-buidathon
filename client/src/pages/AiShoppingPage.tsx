@@ -704,8 +704,17 @@ export const AiShoppingPage: React.FC<AiShoppingPageProps> = ({
         order={activeOrder}
         paymentOrder={activePaymentOrder}
         onPaymentSuccess={(res) => {
+          setActiveCart(null);
+          onCartUpdated({
+            id: '',
+            items: [],
+            subtotal: 0,
+            discount: 0,
+            total: 0,
+          });
           setRazorpayModalOpen(false);
-          onOrderPaid(activeOrder, res.auditId);
+          const auditId = res?.auditId || `AC-${Date.now().toString().slice(-5)}`;
+          onOrderPaid(activeOrder, auditId);
         }}
         onPaymentFailure={() => {
           // Handled within modal

@@ -3,7 +3,8 @@ import { api } from '../services/api.js';
 import { RazorpayModal } from '../components/RazorpayModal.js';
 import { Cart } from '../types/index.js';
 import { getProductImageUrl } from '../utils/productImages.js';
-import { ShoppingBag, Trash2, ShieldCheck, CreditCard, Bot } from 'lucide-react';
+import { ShoppingBag, Trash2, ShieldCheck, CreditCard, Bot, RefreshCw } from 'lucide-react';
+import { useBasket } from '../context/BasketContext.js';
 
 interface CartPageProps {
   cart: Cart | null;
@@ -18,6 +19,7 @@ export const CartPage: React.FC<CartPageProps> = ({
   onCartUpdated,
   onOrderPaid,
 }) => {
+  const { clearBasket } = useBasket();
   const [loading, setLoading] = useState(false);
   const [razorpayModalOpen, setRazorpayModalOpen] = useState(false);
   const [activeOrder, setActiveOrder] = useState<any>(null);
@@ -264,8 +266,17 @@ export const CartPage: React.FC<CartPageProps> = ({
             disabled={loading}
             className="w-full flex items-center justify-center gap-2 py-4 px-4 rounded-xl bg-[#141413] hover:bg-[#262624] text-[#FAF9F6] font-medium text-xs uppercase tracking-[0.14em] shadow-sm transition-all hover:-translate-y-0.5 active:scale-95 disabled:opacity-60"
           >
-            <CreditCard className="w-4 h-4 text-amber-300" />
-            <span>Pay {cart.total >= 1000 ? `₹${cart.total.toLocaleString('en-IN')}` : `£${cart.total}`} with Razorpay</span>
+            {loading ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin text-amber-300" />
+                <span>Preparing Razorpay Checkout...</span>
+              </>
+            ) : (
+              <>
+                <CreditCard className="w-4 h-4 text-amber-300" />
+                <span>Pay {cart.total >= 1000 ? `₹${cart.total.toLocaleString('en-IN')}` : `£${cart.total}`} with Razorpay</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -276,8 +287,17 @@ export const CartPage: React.FC<CartPageProps> = ({
         order={activeOrder}
         paymentOrder={activePaymentOrder}
         onPaymentSuccess={(res) => {
+          clearBasket();
+          onCartUpdated({
+            id: '',
+            items: [],
+            subtotal: 0,
+            discount: 0,
+            total: 0,
+          });
           setRazorpayModalOpen(false);
-          onOrderPaid(activeOrder, res.auditId || `AC-${Date.now().toString().slice(-5)}`);
+          const auditId = res?.auditId || `AC-${Date.now().toString().slice(-5)}`;
+          onOrderPaid(activeOrder, auditId);
         }}
         onPaymentFailure={() => {}}
       />

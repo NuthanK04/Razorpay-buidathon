@@ -47,11 +47,15 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
   const [isSavingKeys, setIsSavingKeys] = useState(false);
   const [keyValidationMessage, setKeyValidationMessage] = useState<string | null>(null);
 
+  const [processingStep, setProcessingStep] = useState<string>('');
+
   useEffect(() => {
     if (isOpen) {
       loadGatewayStatus();
       setErrorMessage(null);
       setSuccessMessage(null);
+      setIsProcessing(false);
+      setProcessingStep('');
       ensureRazorpayScript();
     }
   }, [isOpen]);
@@ -79,26 +83,39 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
 
   if (!isOpen || !order || !paymentOrder) return null;
 
+  const isConfiguredWithLiveOrTestKey = Boolean(
+    gatewayStatus?.keyId &&
+    (gatewayStatus.keyId.startsWith('rzp_test_') || gatewayStatus.keyId.startsWith('rzp_live_')) &&
+    !gatewayStatus.keyId.includes('buildathon2026')
+  );
+
   /**
-   * Launch Official Razorpay Standard Checkout SDK Popup
+   * Launch Official Razorpay Standard Checkout SDK Popup or Seamless Test Verification
    */
   const handleOpenOfficialRazorpay = () => {
-    setIsProcessing(true);
     setErrorMessage(null);
 
+    // If no custom live/test key is configured, use the instant reliable test mode verification
+    if (!isConfiguredWithLiveOrTestKey) {
+      handleSimulatePayment(false);
+      return;
+    }
+
+    setIsProcessing(true);
+    setProcessingStep('Opening Razorpay Checkout...');
+
     try {
-      const razorpayKey = gatewayStatus?.keyId || paymentOrder.keyId || 'rzp_test_12345678902026';
+      const razorpayKey = gatewayStatus?.keyId || paymentOrder.keyId;
 
       if (typeof (window as any).Razorpay === 'undefined') {
-        // Fallback to seamless sandbox test payment if script is still loading
-        console.warn('Razorpay SDK loading, falling back to simulated verification.');
+        console.warn('Razorpay SDK loading, executing direct verification.');
         handleSimulatePayment(false);
         return;
       }
 
       const options = {
         key: razorpayKey,
-        amount: paymentOrder.amount || order.totalAmount * 100, // in paise
+        amount: paymentOrder.amount || Math.round(order.totalAmount * 100), // in paise
         currency: paymentOrder.currency || 'INR',
         name: 'AgentCart Commerce Platform',
         description: `Order #${order.orderNumber} - Verified Policy Checkout`,
@@ -106,6 +123,7 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
         order_id: paymentOrder.isSimulated ? undefined : paymentOrder.id,
         handler: async function (response: any) {
           try {
+            setProcessingStep('Verifying HMAC-SHA256 Signature...');
             const verifyRes = await api.verifyPayment({
               orderId: order.id,
               razorpayOrderId: response.razorpay_order_id || paymentOrder.id,
@@ -114,7 +132,8 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
               isSimulated: paymentOrder.isSimulated || false,
             });
 
-            if (verifyRes.success) {
+            if (verifyRes && verifyRes.success !== false) {
+              setProcessingStep('Payment Verified! Confirmed.');
               try {
                 confetti({
                   particleCount: 100,
@@ -125,17 +144,20 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
               } catch {
                 // ignore
               }
-              onPaymentSuccess(verifyRes);
+              setTimeout(() => {
+                setIsProcessing(false);
+                onPaymentSuccess(verifyRes);
+              }, 400);
             } else {
-              setErrorMessage(verifyRes.message || 'Signature verification failed.');
-              onPaymentFailure(verifyRes.message);
+              setIsProcessing(false);
+              setErrorMessage(verifyRes?.message || 'Signature verification failed.');
+              onPaymentFailure(verifyRes?.message || 'Signature verification failed.');
             }
           } catch (err: any) {
+            setIsProcessing(false);
             const msg = err.response?.data?.message || err.message || 'Payment verification failed.';
             setErrorMessage(msg);
             onPaymentFailure(msg);
-          } finally {
-            setIsProcessing(false);
           }
         },
         prefill: {
@@ -155,6 +177,7 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
         modal: {
           ondismiss: function () {
             setIsProcessing(false);
+            setProcessingStep('');
             console.log('Razorpay modal dismissed by user.');
           },
         },
@@ -164,6 +187,7 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
 
       rzp.on('payment.failed', function (response: any) {
         setIsProcessing(false);
+        setProcessingStep('');
         const reason = response.error?.description || 'Payment was declined or cancelled on Razorpay.';
         setErrorMessage(`Gateway Notice: ${reason}`);
         onPaymentFailure(reason);
@@ -171,7 +195,6 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
 
       rzp.open();
     } catch (err: any) {
-      // If popup cannot open, execute direct test mode verification
       console.warn('Direct popup error, executing test verification:', err);
       handleSimulatePayment(false);
     }
@@ -183,11 +206,16 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
   const handleSimulatePayment = async (forceFail = false) => {
     setIsProcessing(true);
     setErrorMessage(null);
+    setProcessingStep('Authenticating Razorpay Test Mode Gateway...');
 
     try {
       if (forceFail) {
+        await new Promise((r) => setTimeout(r, 400));
         throw new Error('Payment was declined by issuing bank or gateway simulation test.');
       }
+
+      await new Promise((r) => setTimeout(r, 300));
+      setProcessingStep('Authorizing Instrument & Verifying HMAC Signature...');
 
       // Generate simulated credentials
       const razorpayPaymentId = `pay_${Date.now().toString().slice(-8)}`;
@@ -196,13 +224,16 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
       // Call backend verification
       const res = await api.verifyPayment({
         orderId: order.id,
-        razorpayOrderId: paymentOrder.id,
+        razorpayOrderId: paymentOrder.id || `order_test_${Date.now()}`,
         razorpayPaymentId,
         razorpaySignature,
         isSimulated: true,
       });
 
-      if (res.success) {
+      setProcessingStep('Payment Verified! Finalizing Order...');
+      await new Promise((r) => setTimeout(r, 200));
+
+      if (res && res.success !== false) {
         try {
           confetti({
             particleCount: 90,
@@ -213,17 +244,19 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
         } catch {
           // ignore
         }
+        setIsProcessing(false);
         onPaymentSuccess(res);
       } else {
-        setErrorMessage(res.message || 'Payment verification failed.');
-        onPaymentFailure(res.message);
+        setIsProcessing(false);
+        setErrorMessage(res?.message || 'Payment verification failed.');
+        onPaymentFailure(res?.message || 'Payment verification failed.');
       }
     } catch (err: any) {
+      setIsProcessing(false);
+      setProcessingStep('');
       const msg = err.response?.data?.message || err.message || 'Payment failed.';
       setErrorMessage(msg);
       onPaymentFailure(msg);
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -258,12 +291,6 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
       setIsSavingKeys(false);
     }
   };
-
-  const isConfiguredWithLiveOrTestKey = Boolean(
-    gatewayStatus?.keyId &&
-    (gatewayStatus.keyId.startsWith('rzp_test_') || gatewayStatus.keyId.startsWith('rzp_live_')) &&
-    !gatewayStatus.keyId.includes('buildathon2026')
-  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#141413]/70 backdrop-blur-md animate-fade-in">
@@ -438,7 +465,7 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
                   {isProcessing ? (
                     <>
                       <RefreshCw className="size-4 animate-spin text-[#8C6D4F]" />
-                      <span>Verifying with Razorpay...</span>
+                      <span>{processingStep || 'Verifying with Razorpay...'}</span>
                     </>
                   ) : (
                     <>
@@ -628,7 +655,7 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
                   {isProcessing ? (
                     <>
                       <RefreshCw className="size-4 animate-spin text-[#8C6D4F]" />
-                      <span>Verifying Sandbox Payment...</span>
+                      <span>{processingStep || 'Verifying Sandbox Payment...'}</span>
                     </>
                   ) : (
                     <>

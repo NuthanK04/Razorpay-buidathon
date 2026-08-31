@@ -208,6 +208,29 @@ export class CartService {
   }
 
   /**
+   * Remove item from cart
+   */
+  public static async removeItem(cartId: string, itemId: string) {
+    const item = await prisma.cartItem.findFirst({
+      where: {
+        cartId,
+        OR: [
+          { id: itemId },
+          { productId: itemId },
+        ],
+      },
+    });
+
+    if (item) {
+      await prisma.cartItem.delete({
+        where: { id: item.id },
+      });
+    }
+
+    return await this.recalculateCart(cartId);
+  }
+
+  /**
    * Clear all items from a cart
    */
   public static async clearCart(cartId: string) {
