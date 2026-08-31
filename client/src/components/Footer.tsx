@@ -126,7 +126,7 @@ export function Footer({ onNavigateSection }: FooterProps) {
                   target="_blank"
                   rel="noreferrer"
                   className="hover:text-foreground transition-colors"
-                > 
+                >
                   Instagram
                 </a>
               </li>
